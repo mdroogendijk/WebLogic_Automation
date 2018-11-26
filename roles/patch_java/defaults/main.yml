@@ -1,0 +1,18 @@
+---
+# Setting default values
+
+java_home: "/u01/app/java"
+java_home_bkp: "/u01/app/java_bkp"
+
+wls_home: "/u01/app/oracle/products/wl_server"
+osb_home: "{{ wls_home }}/OSB"
+soa_home: "{{ wls_home }}/SOA"
+
+patch_java: true #call playbook with value 'false' to excluse jdk patching
+
+rollback: false #call playbook with value 'true' if patch needs to be removed
+
+rollback_jdk: false #call playbook with value 'true' if previous jdk version is required
+
+dryrun: true #call playbook with value 'false' to actually execute changes
+

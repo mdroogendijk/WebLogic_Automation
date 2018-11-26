@@ -1,0 +1,129 @@
+---
+## Tasks for actual patching
+
+## Pre patch/rollback actions
+
+- name: list jdk version
+  command: "{{ java_home }}/bin/java -version"
+  register: jdk_pre
+  tags:
+    - list
+    - java-only
+  
+- name: list FMW patches installed
+  command: "{{ item }}/OPatch/opatch lsinventory -oh {{ item }}"
+  when: "{{ item }} is defined"
+  with_items:
+    - "{{ admin_wls_home }}"
+    - "{{ managed_wls_home }}"
+#    - "{{ soa_home }}"
+  register: lsinv_pre
+  tags:
+    - list
+
+- name: stop server before patching - with nodemanager
+  command: "echo stopping server with nodemanager"
+  when: "{{ item }} is defined and stop_through_nm and not dryrun"
+    with_items:
+    - "{{ admin_wls_home }}"
+    - "{{ managed_wls_home }}"
+
+- name: stop server before patching - with nodemanager
+  command: "echo stopping server with nodemanager"
+  when: "{{ item }} is defined and nm_controlled and not dryrun"
+    with_items:
+    - "{{ admin_wls_home }}"
+    - "{{ managed_wls_home }}"
+
+- name: stop nodemanager before jdk patching
+  command: "echo kill nm process here"
+  when: nm_controlled and not dryrun
+  tags: 
+    - java-only  
+    
+
+## Patch actions
+
+- name: backup jdk
+  command: "mv {{ java_home }} {{ java_home_bkp }}"
+  when: not rollback and not dryrun
+  tags:
+    - patch_java
+  
+- name: install new jdk version
+  command: "tar -xzf {{ patch_dir_jdk }}/latest/*.tar.gz -C {{ java_home }}"
+  when: not rollback and not dryrun 
+  tags:
+    - patch_java
+    
+- name: list wls patches to be installed/rollbacked
+  command: "ls {{ patch_dir_wls }}"
+  register: wls_patches
+  
+- name: patch weblogic adminserver
+  command: "ls {{ patch_dir_wls }}/{{ item }}" ## logica per patch opgeven bij conflicts mist nog
+  when: "{{ admin_wls_home }}is defined and not rollback and not dryrun"
+  with_items:
+    - "{{ wls_patches }}"
+
+- name: patch weblogic managed servers
+  command: "ls {{ patch_dir_wls }}/{{ patches }}" ## logica per patch opgeven bij conflicts mist nog
+  when: "{{ managed_wls_home }}is defined and not rollback and not dryrun"
+  with_items:
+    - "{{ wls_patches }}"
+
+#- name: patch osb
+#  command: echo "patch osb" 
+#  when: osb_home is defined and not rollback and not dryrun
+
+#- name: patch soa
+#  command: echo "patch soa"
+#  when: soa_home is defined and not rollback and not dryrun
+
+## Rollback actions
+  
+- name: rollback jdk
+  command: echo "rollback jdk"
+  when: rollback_jdk and not dryrun
+  tags:
+    - patch_java
+    
+- name: rollback weblogic
+  command: echo "rollback weblogic"
+  when: rollback and not dryrun
+
+#- name: rollback osb
+#  command: echo "rollback osb"
+#  when: osb_home is defined and rollback and not dryrun
+
+#- name: rollback soa
+#  command: echo "rollback soa"
+#  when: soa_home is defined and rollback and not dryrun
+
+## Post patch/rollback actions
+
+- name: point to new jdk version
+  command: echo "ln to java and fix java.security"
+  when: no_dryrun
+  tags:
+    - patch_java
+
+- name: list jdk version
+  command: "{{ java_home }}/bin/java -version"
+  register: jdk_post
+  when: debug
+  tags:
+    - patch_java
+  
+- name: list FMW patches installed
+  command: "{{ item }}/OPatch/opatch lsinventory -oh {{ item }}"
+  when: "debug and {{ item }} is defined"
+  with_items:
+    - "{{ admin_wls_home }}"
+    - "{{ managed_wls_home }}"
+#    - "{{ soa_home }}"
+  register: lsinv_post
+    
+- name: start environment after patching
+  command: "echo starting env (managed servers, adminserver, nodemanagers)"
+  when: not dryrun

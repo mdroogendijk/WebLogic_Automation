@@ -1,0 +1,39 @@
+---
+## Tasks for patching java
+
+## Pre patch/rollback actions
+
+- name: list java version
+  command: "{{ java_home }}/bin/java -version"
+  register: java_pre
+  tags:
+    - list
+
+## Patch actions
+
+- name: backup java
+  command: "mv {{ java_home }} {{ java_home_bkp }}"
+  when: not rollback and not dryrun
+
+     
+- name: install new java version
+  command: "tar -xzf {{ patch_dir_jdk }}/latest/*.tar.gz -C {{ java_home }}"
+  when: not rollback and not dryrun 
+    
+    
+## Rollback actions
+  
+- name: rollback java
+  command: echo "rollback java"
+  when: rollback_jdk and not dryrun
+    
+
+## Post patch/rollback actions
+
+- name: point to new java version
+  command: echo "ln to java and fix java.security"
+  when: no_dryrun
+
+- name: list java version
+  command: "{{ java_home }}/bin/java -version"
+  register: java_post

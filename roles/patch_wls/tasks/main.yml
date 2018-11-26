@@ -1,0 +1,139 @@
+---
+## Tasks for patching jdk and wls
+
+## Pre patch/rollback actions
+
+#- name: list jdk version
+#  command: "{{ java_home }}/bin/java -version"
+#  register: jdk_pre
+#  tags:
+#    - list
+#    - patch_java
+  
+- name: list WebLogic patches installed
+  command: "cd {{ bsu_dir }};bsu -view -status=applied"
+  register: bsu_view_pre
+  tags:
+    - list
+    - patch_wls
+
+## Stop everything using the restart role
+
+#- name: stop environment after patching
+#  import_role:
+#    name: stop
+#  when: not dryrun
+#  tags:
+#    - patch_java
+#    - patch_wls
+  
+
+## Patch actions
+
+#- name: backup jdk
+#  command: "mv {{ java_home }} {{ java_home_bkp }}"
+#  when: not rollback and not dryrun
+#  tags:
+#    - patch_java
+    
+  
+#- name: install new jdk version
+#  command: "tar -xzf {{ patch_dir_jdk }}/latest/*.tar.gz -C {{ java_home }}"
+#  when: not rollback and not dryrun 
+#  tags:
+#    - patch_java
+    
+- name: list wls patches to be installed/rollbacked
+  command: "echo {{ wls_patches }}"
+  tags:
+    - patch_wls
+
+- name: copy patches to bsu cache dir
+  command: echo "cp {{ item }} to cache_dir"
+  when: not rollback and not dryrun
+  with_items:
+    - "{{ wls_patches }}"
+  tags:
+    - patch_wls
+  
+- name: patch weblogic servers
+  command: "cd {{ bsu_dir }};bsu -install {{ item }}"
+  when: not rollback and not dryrun
+  with_items:
+    - "{{ wls_patches }}"
+  tags:
+    - patch_wls
+
+## Placeholder for osb and soa patching
+    
+############################################################
+#- name: patch osb
+#  command: echo "patch osb" 
+#  when: osb_home is defined and not rollback and not dryrun
+
+#- name: patch soa
+#  command: echo "patch soa"
+#  when: soa_home is defined and not rollback and not dryrun
+############################################################
+
+
+## Rollback actions
+  
+#- name: rollback jdk
+#  command: echo "rollback jdk"
+#  when: rollback_jdk and not dryrun
+#  tags:
+#    - patch_java
+    
+- name: rollback weblogic
+  command: echo "cd {{ bsu_dir }};bsu -remove {{ item }}"
+  when: rollback and not dryrun
+  with_items:
+    - "{{ wls_patches }}"
+  tags:
+    - patch_wls
+
+    
+## Placeholder for osb and soa rollback
+
+############################################################
+#- name: rollback osb
+#  command: echo "rollback osb"
+#  when: osb_home is defined and rollback and not dryrun
+
+#- name: rollback soa
+#  command: echo "rollback soa"
+#  when: soa_home is defined and rollback and not dryrun
+############################################################
+
+
+## Post patch/rollback actions
+
+#- name: point to new jdk version
+#  command: echo "ln to java and fix java.security"
+#  when: no_dryrun
+#  tags:
+#    - patch_java
+
+#- name: list jdk version
+#  command: "{{ java_home }}/bin/java -version"
+#  register: jdk_post
+#  when: debug
+#  tags:
+#    - patch_java
+  
+- name: list WebLogic patches installed
+  command: "cd {{ bsu_dir }};bsu -view -status=applied"
+  register: bsu_view_post
+  tags:
+    - patch_wls
+
+  
+## Start everything using the restart role
+  
+#- name: start environment after patching
+#  import_role:
+#    name: start
+#  when: not dryrun
+#    - patch_java
+#    - patch_wls

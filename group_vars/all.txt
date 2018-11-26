@@ -1,0 +1,8 @@
+# Generic variables
+patch_dir_jdk="/tmp/jdk"
+patch_dir_wls="/tmp/wls"
+patch_dir_osb="/tmp/osb"
+patch_dir_soa="/tmp/soa"
+
+wls_home=/u02/app/products/middleware/wl_server
+bsu_cache_dir=/u02/app/products/middleware/wl_server/bsu/cache_dir

@@ -1,0 +1,5 @@
+---
+
+new_jdk: 8u192
+rollback_jdk: 8u191
+
