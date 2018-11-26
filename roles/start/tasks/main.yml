@@ -1,0 +1,6 @@
+---
+## Tasks for starting the application servers
+
+- name: start application servers on host after patching
+  command: "echo starting server with script x"
+  when: not dryrun

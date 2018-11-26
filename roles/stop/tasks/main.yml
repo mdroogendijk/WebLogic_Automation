@@ -1,0 +1,6 @@
+---
+## Tasks for stopping the application servers
+
+- name: stop application servers on host before patching
+  command: "echo stopping server with script x"
+  when: not dryrun
