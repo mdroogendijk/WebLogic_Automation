@@ -1,39 +1,15 @@
 ---
 ## Tasks for patching java
 
-## Pre patch/rollback actions
+##=====================================================
+## Include tasks file corresponding to OS type
+##=====================================================
 
-- name: list java version
-  command: "{{ java_home }}/bin/java -version"
-  register: java_pre
+- name: select tasks file to use
+  set_fact:
+    include_file: "{{ 'windows.yml' if (os_type == 'windows') else 'linux.yml' }}"
   tags:
-    - list
+    - always
 
-## Patch actions
-
-- name: backup java
-  command: "mv {{ java_home }} {{ java_home_bkp }}"
-  when: not rollback and not dryrun
-
-     
-- name: install new java version
-  command: "tar -xzf {{ patch_dir_jdk }}/latest/*.tar.gz -C {{ java_home }}"
-  when: not rollback and not dryrun 
-    
-    
-## Rollback actions
-  
-- name: rollback java
-  command: echo "rollback java"
-  when: rollback_jdk and not dryrun
-    
-
-## Post patch/rollback actions
-
-- name: point to new java version
-  command: echo "ln to java and fix java.security"
-  when: no_dryrun
-
-- name: list java version
-  command: "{{ java_home }}/bin/java -version"
-  register: java_post
+- name: include tasks file for given os type
+  include_tasks: "{{ include_file }}"

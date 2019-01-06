@@ -1,0 +1,7 @@
+---
+
+## Location where patches are temporarily placed
+repo_install_dir: "/tmp/wls_patches"
+
+repo_file_list:
+  - { part: 1, archive_file: "*.zip*" }

@@ -1,0 +1,121 @@
+---
+## Tasks for starting the application servers
+
+
+##=====================================================
+## Initial check
+##=====================================================
+
+- name: check if there are running WebLogic processes
+  command: pgrep -f "Dweblogic"
+  register: ps_pre
+  changed_when: false
+  failed_when: ( ps_pre.rc not in [ 0, 1 ] )
+  check_mode: no
+
+- name: print running WebLogic processes
+  debug:
+    var: ps_pre.stdout_lines
+
+
+##=====================================================
+## Start Node Manager
+##=====================================================
+
+- block:
+
+  - name: check if init.d script is present for Node Manager
+    stat:
+      path: "{{ initd_nm_script }}"
+    register: stat_nm_result
+
+  - name: start Node Manager after patching
+    command: "{{ initd_nm_script }} start"
+    changed_when: false
+    when: stat_nm_result
+
+  when: initd_nm
+
+- block:
+
+  - name: placeholder for other means
+    command: echo "placeholder for non init.d actions"
+
+  when: not initd_nm
+ 
+
+##=====================================================
+## Start AdminServer if present
+##=====================================================
+
+- block:
+
+  - name: check if init.d script is present for AdminServer
+    stat:
+      path: "{{ initd_admin_script }}"
+    register: stat_admin_result
+
+  - name: start AdminServer after patching
+    command: "/usr/bin/nohup {{ initd_admin_script }} start >/dev/null 2>&1"
+    changed_when: false
+    when: stat_admin_result
+
+  when: initd_admin
+
+- block:
+
+  - name: placeholder for other means
+    command: echo "placeholder for non init.d actions"
+
+  when: not initd_admin
+ 
+
+##=====================================================
+## Start Managed Servers if present
+##=====================================================
+
+- block:
+
+  - name: fetch init.d scripts to run for managed servers
+    shell: >
+      ls /etc/init.d/weblogic* | grep -v "nm\|admin"
+    register: initdscripts_ms
+    changed_when: false
+    failed_when: ( initdscripts_ms.rc not in [ 0, 1 ] )
+    check_mode: no
+
+  - name: print init.d scripts for managed servers
+    debug:
+      var: initdscripts_ms.stdout_lines
+
+  - name: start managed servers after patching
+    command: "{{ item }} start"
+    changed_when: false
+    when: initdscripts_ms is defined
+    with_items:
+      - "{{ initdscripts_ms.stdout_lines }}"
+
+  when: initd_managed
+
+- block:
+
+  - name: placeholder for other means
+    command: echo "placeholder for non init.d actions"
+
+  when: not initd_managed
+ 
+
+##=====================================================
+## Final check
+##=====================================================
+  
+- name: check if any processes are started (after patching)
+  command: pgrep -f "Dweblogic"
+  register: ps_post
+  changed_when: false
+  failed_when: ps_post.rc == 1
+  check_mode: no
+
+- name: print running WebLogic processes
+  debug:
+    var: ps_post.stdout_lines

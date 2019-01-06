@@ -1,0 +1,10 @@
+---
+
+## Location for temporary java installation
+java_base: "/tmp/temp_java"
+
+## Location where patches are temporarily placed
+repo_install_dir: "/tmp/webgate_patches"
+
+repo_file_list:
+  - { part: 1, archive_file: "*.zip*" }

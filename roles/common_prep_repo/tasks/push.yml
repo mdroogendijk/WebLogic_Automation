@@ -1,0 +1,22 @@
+---
+
+- name: create remote repo file directory
+  file:
+    path: "{{ repo_install_dir }}"
+    state: directory
+    owner: "{{ privileged_user }}"
+    group: "{{ privileged_group }}"
+    mode: 0777
+
+- name: push file to target
+  copy: 
+    src: "{{ item }}"
+    dest: "{{ repo_install_dir }}"
+    mode: 0644
+  with_fileglob:
+    - "/repos/{{ repo_source }}/{{ repo_dir }}/*"
+  become: no
+
+#  become: yes
+#  become_user: root
+#  become_method: sudo

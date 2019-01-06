@@ -1,5 +1,7 @@
 ---
 
-new_jdk: 8u192
-rollback_jdk: 8u191
+## Location where patches are temporarily placed
+repo_install_dir: "/tmp/java"
 
+repo_file_list:
+  - { part: 1, archive_file: "*.tar*" }

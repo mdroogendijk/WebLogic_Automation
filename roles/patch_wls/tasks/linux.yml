@@ -1,0 +1,222 @@
+---
+## Tasks for patching wls
+
+
+##=====================================================
+## Pre patch/rollback actions
+##=====================================================
+
+- name: get weblogic patches applied
+  command: "./bsu.sh -view -status=applied -prod_dir={{ wls_home }}"
+  args:
+    chdir: "{{ bsu_dir }}"
+  register: wls_applied_pre
+  changed_when: false
+  check_mode: no
+
+- name: print weblogic patches applied
+  debug:
+    var: wls_applied_pre.stdout_lines
+
+- name: create local lists dir if not present
+  local_action:
+    module: file
+    state: directory
+    mode: 0777
+    path: "{{ lists_dir }}"
+  become: no
+
+- name: write weblogic patches applied to local lists file
+  local_action:
+    module: blockinfile
+    block: "{{ wls_applied_pre.stdout_lines }}"
+    marker: "<!-- {mark} ANSIBLE MANAGED BLOCK - WEBLOGIC PATCH(ES) -->"
+    create: yes
+    mode: 0666
+    path: "{{ lists_dir }}/{{ inventory_hostname }}"
+  become: no
+
+- block:
+
+  - name: check if wls_patch is provided
+    assert:
+      that:
+        - wls_patch | match ("^[a-zA-Z]*$")
+      msg:
+        - "weblogic patch to install is not defined or not defined properly"
+        - "please provide wls_patch, f.e. --extra-vars wls_patch='GENM'"
+
+  - name: print weblogic patch to be applied/removed (csv format)
+    debug:
+      msg: "WebLogic patch to apply/remove: {{ wls_patch }}"
+
+  when: not ansible_check_mode
+
+- name: check if processes are absent (before patching)
+  command: pgrep -f "Dweblogic"
+  register: ps_check
+  changed_when: false
+  failed_when: ps_check.rc == 0
+
+
+##=====================================================
+## Patch BSU actions
+##=====================================================
+
+- name: get bsu version as prereq check for bsu update
+  command: "./bsu.sh -version"
+  args:
+    chdir: "{{ bsu_dir }}"
+  changed_when: false
+  register: bsu_version
+  check_mode: no
+
+- block: 
+
+  - name: fetch bsu patch zipfile(s) from artifactory
+    include_role:
+      name: common_prep_repo
+    vars:
+      repo_dir: bsu
+
+  - name: extract bsu patch to bsu dir
+    unarchive:
+      src: "{{ repo_install_dir }}/{{ bsu_patch }}"
+      dest: "{{ bsu_dir }}"
+      remote_src: yes
+      mode: 0744
+
+  - name: install bsu patch prior to weblogic patching
+    command: "./bsu_update.sh install"
+    args:
+      chdir: "{{ bsu_dir }}"
+
+  - name: clean up bsu patch zipfile in temp dir
+    file:
+      path: "{{ repo_install_dir }}/{{ bsu_patch }}"
+      state: absent
+    become: no
+  
+  when: "'3.3.0.0' in bsu_version.stdout and not ansible_check_mode"
+
+##=====================================================
+## Patch WebLogic actions
+##=====================================================
+
+- block:
+
+  - name: fetch weblogic patch zipfile(s) from artifactory
+    include_role:
+      name: common_prep_repo
+    vars:
+      repo_dir: weblogic
+
+  - name: get patch zipfile(s) in repo
+    find:
+      paths: "{{ repo_install_dir }}"
+      patterns: "*.zip*"
+    register: wls_patch_zipfiles
+
+  - name: extract patch zipfile(s) to bsu cache_dir
+    unarchive:
+      src: "{{ item.path }}"
+      dest: "{{ bsu_cache_dir }}"
+      list_files: yes
+      remote_src: yes
+    with_items:
+      - "{{ wls_patch_zipfiles.files }}"
+
+  - name: check if patch jarfile is in bsu cache dir
+    find:
+      paths: "{{ bsu_cache_dir }}"
+      patterns: "{{ wls_patch }}.jar*"
+    register: jarfile_present
+    failed_when: jarfile_present.matched == 0
+
+  - name: get conflicting patch(es) currently applied
+    set_fact: 
+      conflict: "{{ conflict }} + [ '{{ item }}' ]"
+    when: wls_applied_pre.stdout | search(item)
+    with_items: 
+      - "{{ conflicting_wls_patches }}"
+
+  - name: rollback conflicting patch before applying new patch
+    command: "./bsu.sh -remove -patchlist={{ item }} -prod_dir={{ wls_home }}"
+    args:
+      chdir: "{{ bsu_dir }}"
+    when: conflict
+    with_items:
+      - "{{ conflict }}"
+
+  - name: apply weblogic patch
+    command: "./bsu.sh -install -patchlist={{ wls_patch }} -prod_dir={{ wls_home }}"
+    args:
+      chdir: "{{ bsu_dir }}"
+    register: patch_result
+    ## ignore (OoM) errors while patching was successful
+    failed_when: "'Result: Success' not in patch_result.stdout and 'Patch already installed' not in patch_result.stdout"
+
+  - name: get weblogic patch zipfile(s) in temp dir
+    find:
+      paths: "{{ repo_install_dir }}"
+      patterns: "*.zip*"
+    register: zipfiles_to_delete
+
+  - name: clean up weblogic patch zipfile(s) in temp dir
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items:
+      - "{{ zipfiles_to_delete.files }}"
+    become: no
+
+  when: not rollback_wls and not ansible_check_mode
+
+ 
+##=====================================================
+## Rollback actions
+##=====================================================
+
+- block:
+
+  - name: rollback weblogic patch
+    command: "./bsu.sh -remove -patchlist={{ wls_patch }} -prod_dir={{ wls_home }}"
+    args:
+      chdir: "{{ bsu_dir }}"
+
+  - name: apply different (previous) weblogic patch if provided
+    command: "./bsu.sh -install -patchlist={{ rollback_wls_to_patch }} -prod_dir={{ wls_home }}"
+    args:
+      chdir: "{{ bsu_dir }}"
+    register: patch_result
+    ## ignore (OoM) errors while patching was successful
+    failed_when: "'Result: Success' not in patch_result.stdout and 'Patch already installed' not in patch_result.stdout"
+    when: rollback_wls_to_patch != ""
+
+  when: rollback_wls
+
+##=====================================================
+## Post patch/rollback actions
+##=====================================================
+ 
+- name: get weblogic patches applied
+  command: "./bsu.sh -view -status=applied -prod_dir={{ wls_home }}"
+  args:
+    chdir: "{{ bsu_dir }}"
+  register: wls_applied_post
+  changed_when: false
+  check_mode: no
+
+- name: print weblogic patches applied
+  debug:
+    var: wls_applied_post.stdout_lines
+
+- name: write weblogic patches applied to local lists file
+  local_action:
+    module: blockinfile
+    block: "{{ wls_applied_post.stdout_lines }}"
+    marker: "<!-- {mark} ANSIBLE MANAGED BLOCK - WEBLOGIC PATCH(ES) -->"
+    create: yes
+    mode: 0666
+    path: "{{ lists_dir }}/{{ inventory_hostname }}"
+  become: no

@@ -1,0 +1,16 @@
+---
+## Tasks for stopping the application servers
+
+
+##=====================================================
+## Include tasks file corresponding to OS type
+##=====================================================
+
+- name: select tasks file to use
+  set_fact:
+    include_file: "{{ 'windows.yml' if (os_type == 'windows') else 'linux.yml' }}"
+  tags:
+    - always
+
+- name: include tasks file for given os type
+  include_tasks: "{{ include_file }}"

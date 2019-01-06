@@ -1,0 +1,69 @@
+---
+## Tasks for starting the web servers configured with a WebGate agent
+
+
+##=====================================================
+## Initial check
+##=====================================================
+
+- name: check if there are running web server processes
+  command: pgrep -f "httpd"
+  register: ps_pre
+  changed_when: false
+  failed_when: ( ps_pre.rc not in [ 0, 1 ] )
+  check_mode: no
+
+- name: print running web server processes
+  debug:
+    var: ps_pre.stdout_lines
+
+
+##=====================================================
+## Start Web Servers if present
+##=====================================================
+
+- block:
+
+  - name: fetch init.d scripts to run for web servers
+    shell: >
+      ls /etc/init.d/apache*
+    register: initdscripts_ws
+    changed_when: false
+    failed_when: ( initdscripts_ws.rc not in [ 0, 1 ] )
+    check_mode: no
+
+  - name: print init.d scripts for web servers
+    debug:
+      var: initdscripts_ws.stdout_lines
+
+  - name: start web servers after patching
+    command: "{{ item }} start"
+    changed_when: false
+    when: initdscripts_ws is defined
+    with_items:
+      - "{{ initdscripts_ws.stdout_lines }}"
+
+  when: initd_web
+
+- block:
+
+  - name: placeholder for other means
+    command: echo "placeholder for non init.d actions"
+
+  when: not initd_web
+ 
+
+##=====================================================
+## Final check
+##=====================================================
+  
+- name: check if any processes are started (after patching)
+  command: pgrep -f "httpd"
+  register: ps_post
+  changed_when: false
+  failed_when: ps_post.rc == 1
+  check_mode: no
+
+- name: print running web server processes
+  debug:
+    var: ps_post.stdout_lines

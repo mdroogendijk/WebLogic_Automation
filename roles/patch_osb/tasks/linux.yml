@@ -1,0 +1,159 @@
+---
+## Tasks for patching OSB
+
+##=====================================================
+## Pre patch/rollback actions
+##=====================================================
+
+- name: get osb patches applied
+  command: "OPatch/opatch lsinv"
+  args:
+    chdir: "{{ osb_home }}"
+  register: osb_applied_pre
+  changed_when: false
+  check_mode: no
+
+- name: print osb patches applied
+  debug:
+    var: osb_applied_pre.stdout_lines
+
+- name: create local lists dir if not present
+  local_action:
+    module: file
+    state: directory
+    mode: 0777
+    path: "{{ lists_dir }}"
+  become: no
+
+- name: write osb patches applied to local lists file
+  local_action:
+    module: blockinfile
+    block: "{{ osb_applied_pre.stdout_lines }}"
+    marker: "<!-- {mark} ANSIBLE MANAGED BLOCK - OSB PATCH(ES) -->"
+    create: yes
+    mode: 0666
+    path: "{{ lists_dir }}/{{ inventory_hostname }}"
+  become: no
+
+- block:
+
+  - name: check if osb_patch is provided
+    assert:
+      that:
+        - osb_patch | match ("^[a-zA-Z]*$")
+      msg:
+        - "osb patch to install is not defined or not defined properly"
+        - "please provide osb_patch, f.e. --extra-vars osb_patch='...'"
+
+  - name: print osb patch to be applied/removed (csv format)
+    debug:
+      msg: "osb patch to apply/remove: {{ osb_patch }}"
+
+  when: not ansible_check_mode
+
+- name: check if processes are absent (before patching)
+  command: pgrep -f "Dweblogic"
+  register: ps_check
+  changed_when: false
+  failed_when: ps_check.rc == 0
+
+
+##=====================================================
+## Patch OSB actions
+##=====================================================
+
+- block:
+
+  - name: fetch osb patch zipfile(s) from artifactory
+    include_role:
+      name: common_prep_repo
+    vars:
+      repo_dir: osb
+
+  - name: get patch zipfile(s) in repo
+    find:
+      paths: "{{ repo_install_dir }}"
+      patterns: "*.zip*"
+    register: osb_patch_zipfiles
+
+  - name: extract patch zipfile(s) to idk yet
+    unarchive:
+      src: "{{ item.path }}"
+      dest: "{{ tmp_dir }}"
+      list_files: yes
+      remote_src: yes
+    with_items:
+      - "{{ osb_patch_zipfiles.files }}"
+
+  - name: apply osb patch
+    command: "OPatch/opatch lsinv -silent -force"
+    args:
+      chdir: "{{ wls_home }}"
+    register: patch_result
+    ## ignore (OoM) errors while patching was successful
+#    failed_when: "'Result: Success' not in patch_result.stdout and 'Patch already installed' not in patch_result.stdout"
+
+  - name: get osb patch zipfile(s) in temp dir
+    find:
+      paths: "{{ repo_install_dir }}"
+      patterns: "*.zip*"
+    register: zipfiles_to_delete
+
+  - name: clean up osb patch zipfile(s) in temp dir
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items:
+      - "{{ zipfiles_to_delete.files }}"
+    become: no
+
+  when: not rollback_osb and not ansible_check_mode
+
+ 
+##=====================================================
+## Rollback actions
+##=====================================================
+
+- block:
+
+  - name: rollback osb patch
+    command: "OPatch/opatch lsinv -silent"
+    args:
+      chdir: "{{ wls_home }}"
+
+  - name: apply different (previous) osb patch if provided
+    command: "OPatch/opatch lsinv -silent -force"
+    args:
+      chdir: "{{ wls_home }}"
+    register: patch_result
+    ## ignore (OoM) errors while patching was successful
+#    failed_when: "'Result: Success' not in patch_result.stdout and 'Patch already installed' not in patch_result.stdout"
+    when: rollback_osb_to_patch != ""
+
+  when: rollback_osb
+
+##=====================================================
+## Post patch/rollback actions
+##=====================================================
+ 
+- name: get osb patches applied
+  command: "OPatch/opatch lsinv"
+  args:
+    chdir: "{{ wls_home }}"
+  register: wls_applied_post
+  changed_when: false
+  check_mode: no
+
+- name: print osb patches applied
+  debug:
+    var: osb_applied_post.stdout_lines
+
+- name: write osb patches applied to local lists file
+  local_action:
+    module: blockinfile
+    block: "{{ osb_applied_post.stdout_lines }}"
+    marker: "<!-- {mark} ANSIBLE MANAGED BLOCK - OSB PATCH(ES) -->"
+    create: yes
+    mode: 0666
+    path: "{{ lists_dir }}/{{ inventory_hostname }}"
+  become: no

@@ -1,0 +1,27 @@
+---
+## Playbook for patching and restarting WebGate agents
+
+- name: Patch webgate agents
+  hosts: webgate_hosts
+  ## Perform all tasks on 25% of the hosts before going to the next 25%
+  serial: "25%"
+
+  become: yes
+  become_user: "{{ privileged_user }}"
+  become_method: sudo
+
+  tasks:
+
+    - block:
+
+      - include_role:
+          name: webgate_stop
+        tags: [stop,restart]
+      
+      - include_role: 
+          name: patch_webgate
+        tags: patch_webgate
+    
+      - include_role: 
+          name: webgate_start
+        tags: [start,restart]

@@ -1,0 +1,12 @@
+---
+
+- block:
+
+    ##=====================================================
+    ## Copy repo files from binary object repository to host
+    ##=====================================================
+    - name: Pull files from binary object repository to Ansible controller
+      include_tasks: pull.yml
+
+    - name: Push files from Ansible controller to host
+      include_tasks: push.yml

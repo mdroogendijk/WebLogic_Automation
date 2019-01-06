@@ -1,0 +1,91 @@
+---
+
+##  Default values
+
+## Default user to sudo to
+privileged_user: "weblogic"
+privileged_group: "weblogic"
+
+## Default location for storing jdk version and weblogic patch per host
+lists_dir: "/tmp/wls_lists"
+
+## Default java location
+java_base: "/u01/oracle/products"
+
+## Default java backup location
+java_bkp_dir: "/u01/oracle/products/jdk_bkp"
+
+## Default /bin/java location
+java_exec: "{{ java_base }}/jdk/bin/java"
+
+## Default java symlink destinations
+java_symlink: "jdk{{ java_version }}"
+java_bkp_symlink: "jdk_bkp"
+
+## Temporary java for opatch on WebGate hosts
+temp_java: "/tmp/temp_java"
+
+## Default location for product homes
+mw_home: "/u01/oracle/products/fmw"
+wls_home: "{{ mw_home }}/wlserver_10.3"
+webgate_home: "/tmp/temp_java"
+
+osb_home: "{{ mw_home }}/Oracle_OSB1"
+soa_home: "{{ mw_home }}/Oracle_SOA1"
+
+## Default skip osb and soa
+include_osb: false
+include_soa: false
+
+## Default OS type
+os_type: linux
+
+## Default bsu dir
+bsu_dir: "{{ mw_home }}/utils/bsu"
+
+## Default bsu cache dir
+bsu_cache_dir: "{{ bsu_dir }}/cache_dir"
+
+## Rollback defaults to false
+rollback_java: false
+rollback_wls: false
+rollback_osb: false
+rollback_soa: false
+rollback_webgate: false
+
+## Location of binary object repo
+repo_url: "https://artifactory..."
+
+## Location where patches are temporarily located
+wls_build_dir: opt/wls-build
+
+## Location where patches are stored
+repo_source: "{{ wls_build_dir }}/ORACLE_repos"
+
+## Default use init.d scripts for stop/start
+initd_nm: true
+initd_admin: true
+initd_managed: true
+initd_web: true
+
+## Default init.d admin script
+initd_admin_script: "/etc/init.d/weblogic_admin"
+
+## Default init.d nm script
+initd_nm_script: "/etc/init.d/weblogic_nm"
+
+## BSU patch to install
+bsu_patch: "p27238412_1036_Generic.zip"
+
+## Conflicting patches to be removed before patching
+conflicting_wls_patches: ['RVBS']
+
+## Conflicting patches that are applied
+conflict: "[]"
+
+## WebLogic patch to optionally apply upon rollback
+rollback_wls_to_patch: ""
+
+## ssh args - not working yet, gotta check later on
+#ansible_ssh_common_args: '-F {{ lookup("env", "HOME") }}/.ssh/ssh.cfg -o StrictHostKeyChecking=no -o ProxyCommand="ssh -W %h:%p {{ lookup("env", "USER") }}@jmpbox..."'
+ansible_ssh_common_args: '-o StrictHostKeyChecking=no'

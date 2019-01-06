@@ -1,0 +1,175 @@
+---
+## Tasks for patching java
+
+##=====================================================
+## Pre patch/rollback actions
+##=====================================================
+
+- name: get java version
+  command: "{{ java_exec }} -version"
+  register: java_pre
+  changed_when: false
+  check_mode: no
+
+- name: print java version
+  debug:
+    var: java_pre.stderr_lines
+
+- name: create local lists dir if not present
+  local_action:
+    module: file
+    state: directory
+    mode: 0777
+    path: "{{ lists_dir }}"
+  become: no
+
+- name: write java version to local lists file
+  local_action: 
+    module: blockinfile
+    block: "{{ java_pre.stderr_lines }}"
+    marker: "<!-- {mark} ANSIBLE MANAGED BLOCK - JAVA VERSION -->"
+    create: yes
+    mode: 0666
+    path: "{{ lists_dir }}/{{ inventory_hostname }}"
+  become: no
+
+- name: check if processes are absent (before patching)
+  command: pgrep -f "Dweblogic"
+  register: ps_check
+  changed_when: false
+  failed_when: ps_check.rc == 0
+
+
+##=====================================================
+## Patch actions
+##=====================================================
+
+- block:
+
+  - name: check if java_version is provided
+    assert:
+      that:
+        - java_version | match("1.*.*_*")
+      msg: 
+        - "java version to install is not defined or not defined properly" 
+        - "please provide java_version, f.e. --extra-vars java_version=1.7.0_201"
+
+  - name: print java version to install
+    debug:
+      msg: "java version to install: {{ java_version }}"
+
+  - name: check if current symlink is pointing to jdk_bkp
+    stat:
+      path: "{{ java_base }}/jdk"
+    register: jdk_symlink
+
+  - block:
+
+    - name: clear old backup
+      file:
+        path: "{{ java_bkp_dir }}"
+        state: absent
+
+    ## Ansible modules for recursive copy on remote aren't ideal
+    - name: backup java
+      command: "cp -RHp {{ java_base }}/jdk {{ java_bkp_dir }}"
+
+    ## Only if symlink isn't pointing to the backup
+    when: jdk_symlink.stat.lnk_target != java_bkp_symlink
+
+  - name: fetch java tarball from artifactory
+    include_role:
+      name: common_prep_repo
+    vars:
+      repo_dir: java
+
+  - name: get new java tarball
+    find:
+      paths: "{{ repo_install_dir }}"
+      patterns: "*.tar*"
+    register: tarball_to_install
+
+  - name: install new java version
+    unarchive:
+      src: "{{ item.path }}"
+      dest: "{{ java_base }}"
+      remote_src: yes
+    with_items:
+      - "{{ tarball_to_install.files }}"
+
+  - name: point symlink to new java version
+    file: 
+      path: "{{ java_base }}/jdk"
+      src: "{{ java_symlink }}"
+      state: link
+
+  - name: get old java tarball
+    find:
+      paths: "{{ repo_install_dir }}"
+      patterns: "*.tar*"
+    register: tarball_to_delete
+
+  - name: clean up old java tarballs
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items:
+      - "{{ tarball_to_delete.files }}"
+    become: no
+
+  ## Placeholder for java.security changes and such, if needed
+  
+  when: not rollback_java and not ansible_check_mode
+    
+
+##=====================================================
+## Rollback actions
+##=====================================================
+
+- block:
+
+  - name: check if jdk_bkp is present
+    stat:
+      path: "{{ java_bkp_dir }}"
+    register: stat_java_bkp_result
+    
+  - name: rollback java
+    file:
+      path: "{{ java_base }}/jdk"
+      src: "{{ java_bkp_symlink }}"
+      state: link
+    when: stat_java_bkp_result.stat.exists
+      
+  - name: failed rollback if jdk_bkp does not exist
+    fail:
+      msg: 
+        - "The scripted backup {{ java_bkp_dir }} doesn't exist."
+        - "Please perform manual backup or reinstall the old version."
+    when: not stat_java_bkp_result.stat.exists
+      
+  when: rollback_java and not ansible_check_mode
+  
+
+##=====================================================
+## Post patch/rollback actions
+##=====================================================
+
+- name: get java version
+  command: "{{ java_exec }} -version"
+  register: java_post
+  changed_when: false
+  check_mode: no
+
+- name: print java version
+  debug:
+    var: java_post.stderr_lines
+
+- name: write java version to local lists file
+  local_action:
+    module: blockinfile
+    block: "{{ java_post.stderr_lines }}"
+    marker: "<!-- {mark} ANSIBLE MANAGED BLOCK - JAVA VERSION -->"
+    create: yes
+    mode: 0666
+    path: "{{ lists_dir }}/{{ inventory_hostname }}"
+  become: no

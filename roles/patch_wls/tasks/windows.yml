@@ -1,0 +1,11 @@
+---
+## Tasks for patching wls
+
+
+##=====================================================
+## Pre patch/rollback actions
+##=====================================================
+
+- name: placeholder
+  debug:
+    msg: "test - code to be added later for Windows"

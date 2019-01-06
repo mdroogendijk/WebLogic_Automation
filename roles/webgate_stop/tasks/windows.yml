@@ -1,0 +1,11 @@
+---
+## Tasks for stopping the web servers configured with a WebGate agent
+
+
+##=====================================================
+## Initial check
+##=====================================================
+
+- name: placeholder
+  debug:
+    msg: "test - code to be added later for Windows"

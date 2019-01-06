@@ -1,0 +1,32 @@
+---
+
+- block:
+
+  - name: create local repo file directory
+    local_action:
+      module: file
+      path: "/repos/{{ repo_source }}/{{ repo_dir }}"
+      state: directory
+      group: PortalAdmin
+      mode: 0770
+
+  - name: pull repo files to ansible controller
+    local_action: 
+      module: command /usr/bin/wget.openssl1 -r -l1 -np -nd --ca-directory=/etc/ssl/certs -N -A "{{ item.archive_file }}" "{{ repo_url }}/{{ repo_dir }}/"
+      args:
+        chdir: "/repos/{{ repo_source }}/{{ repo_dir }}"
+    with_items:
+      - "{{ repo_file_list }}"
+
+  - name: chmod as temp workaround for working without root user
+    local_action:
+      module: file
+      path: "{{ item }}"
+      mode: 0666 
+    with_fileglob:
+      - "/repos/{{ repo_source }}/{{ repo_dir }}/*"
+
+  ## needs to be set to yes after testing
+  become: no
+#  become_user: root
+#  become_method: sudo
