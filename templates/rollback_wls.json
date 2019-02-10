@@ -1,0 +1,11 @@
+{
+"java_version": 1.7.0_201, 
+"wls_patch": ['GENM'], 
+"java_tarball": jdk-7u201-linux-x64.tar.gz, 
+"rollback_wls": true, 
+"wls_rollback_patch": ['7HKN'], 
+"rollback_wls_to_previous": true, 
+"wls_zipfiles": ['p28343311_1036_Generic.zip'], 
+"include_soa": false,
+"include_osb": false
+}

@@ -1,9 +1,9 @@
 ---
-## Tasks for stopping the application servers
+## Tasks for restoring backups
 
 
 ##=====================================================
-## Initial check
+## Pre patch/rollback actions
 ##=====================================================
 
 - name: placeholder

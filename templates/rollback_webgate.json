@@ -1,0 +1,5 @@
+{
+"java_version": 1.7.0_211, 
+"rollback_webgate": true, 
+"webgate_rollback_patch": ['27975790'], 
+}

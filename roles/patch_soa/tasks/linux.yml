@@ -1,0 +1,214 @@
+---
+## Tasks for patching SOA
+
+##=====================================================
+## Pre patch/rollback actions
+##=====================================================
+
+- name: check if enough disk space is available
+  assert:
+    that:
+      - item.size_available > mounts_used[item.mount]
+    msg: "Insufficient disk space available on {{ item.mount }}"
+  when: item.mount in mounts_used
+  with_items:
+    - "{{ ansible_mounts }}"
+
+- name: get soa patches applied
+  command: "{{ soa_home }}/OPatch/opatch lsinv -oh {{ soa_home }}"
+  register: soa_applied_pre
+  changed_when: false
+  check_mode: no
+
+- name: print soa patches applied
+  debug:
+    var: soa_applied_pre.stdout_lines
+
+- name: create local lists dir if not present
+  local_action:
+    module: file
+    state: directory
+    mode: 0777
+    path: "{{ lists_dir }}"
+  become: no
+
+- name: write soa patches applied to local lists file
+  local_action:
+    module: blockinfile
+    block: "{{ soa_applied_pre.stdout_lines }}"
+    marker: "<!-- {mark} ANSIBLE MANAGED BLOCK - SOA PATCH(ES) -->"
+    create: yes
+    mode: 0666
+    path: "{{ lists_dir }}/{{ inventory_hostname }}"
+  become: no
+
+- name: check if processes are absent (before patching)
+  command: pgrep -f "Dweblogic"
+  register: ps_check
+  changed_when: false
+  failed_when: ps_check.rc == 0
+
+
+##=====================================================
+## Rollback actions
+##=====================================================
+
+- block:
+
+  - name: check if soa_rollback_patch is provided
+    assert:
+      that:
+        - soa_rollback_patch is defined
+      msg:
+        - "soa patch(es) to remove is not defined"
+        - "please provide soa_rollback_patch, f.e. --extra-vars soa_rollback_patch=['28287135','<optional_patch2>']"
+
+  - name: print soa patch(es) to be removed (csv format)
+    debug:
+      msg: "soa patch(es) to remove: {{ soa_rollback_patch }}"
+
+  - name: rollback soa patch(es) in SOA Home
+    command: "{{ soa_home }}/OPatch/opatch rollback -id {{ item }} -oh {{ soa_home }} -silent"
+    register: rollback_result
+    changed_when: "'Patch not present in the Oracle Home' not in rollback_result.stderr"
+    failed_when: rollback_result.rc != 0 and ("Patch not present in the Oracle Home" not in rollback_result.stderr)
+    with_items:
+      - "{{ soa_rollback_patch }}"
+
+  - name: rollback soa patch(es) in oracle_common Home
+    command: "{{ oracle_common_home }}/OPatch/opatch rollback -id {{ item }} -oh {{ oracle_common_home }} -silent"
+    register: rollback_oc_result
+    changed_when: "'Patch not present in the Oracle Home' not in rollback_oc_result.stderr"
+    failed_when: rollback_oc_result.rc != 0 and ("Patch not present in the Oracle Home" not in rollback_oc_result.stderr)
+    with_items:
+      - "{{ soa_rollback_patch }}"
+
+  when: rollback_soa
+
+
+##=====================================================
+## Patch SOA actions
+##=====================================================
+
+- block:
+
+  - name: check if soa_patch is provided
+    assert:
+      that:
+        - soa_patch is defined
+      msg:
+        - "soa patch(es) to install is not defined"
+        - "please provide soa_patch, f.e. --extra-vars soa_patch=['28287135','<optional_patch2>']"
+
+  - name: print soa patch(es) to be applied (csv format)
+    debug:
+      msg: "soa patch(es) to apply: {{ soa_patch }}"
+
+  - name: fetch soa patch zipfile(s) from artifactory
+    include_role:
+      name: common_prep_repo
+    vars:
+      repo_dir: soa
+      artifacts: "{{ soa_zipfiles }}"
+
+  - name: get patch zipfile(s) in repo
+    find:
+      paths: "{{ repo_install_dir }}"
+      patterns: "*.zip*"
+    register: soa_patch_zipfiles
+
+  - name: ensure patch_tmp_dir exists
+    file:
+      path: "{{ patch_tmp_dir }}"
+      state: directory
+
+  - name: extract patch zipfile(s) to tmp dir
+    unarchive:
+      src: "{{ item.path }}"
+      dest: "{{ patch_tmp_dir }}"
+      list_files: yes
+      remote_src: yes
+    with_items:
+      - "{{ soa_patch_zipfiles.files }}"
+
+  - name: copy response file to host
+    copy:
+      src: ../files/soa_responsefile.rsp
+      dest: "{{ patch_tmp_dir }}"
+
+  - name: backup soa dir prior to patching
+    archive:
+      path: "{{ soa_home }}"
+      dest: "{{ mw_home }}/Oracle_SOA1_bkp.tar.gz"
+
+  - name: backup oracle_common dir prior to patching
+    archive:
+      path: "{{ oracle_common_home }}"
+      dest: "{{ mw_home }}/oracle_common_bkp.tar.gz"
+
+  - name: apply soa patch(es) in SOA Home
+    command: "{{ soa_home }}/OPatch/opatch apply -oh {{ soa_home }} -silent -force"
+    args:
+      chdir: "{{ patch_tmp_dir }}/{{ item }}"
+    register: patch_result
+    with_items:
+      - "{{ soa_patch }}"
+    changed_when: "'following patch(es) are already installed' not in patch_result.stdout"
+
+  - name: apply soa patch(es) in oracle_common Home
+    command: "{{ oracle_common_home }}/OPatch/opatch apply -oh {{ oracle_common_home }} -ocmrf {{ patch_tmp_dir }}/soa_responsefile.rsp -silent -force"
+    args:
+      chdir: "{{ patch_tmp_dir }}/{{ item }}"
+    register: patch_result
+    with_items:
+      - "{{ soa_patch }}"
+    changed_when: "'following patch(es) are already installed' not in patch_result.stdout"
+
+  - name: get soa patch zipfile(s) in temp dir
+    find:
+      paths: "{{ repo_install_dir }}"
+      patterns: "*.zip*"
+    register: zipfiles_to_delete
+
+  - name: clean up soa patch zipfile(s) in temp dir
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items:
+      - "{{ zipfiles_to_delete.files }}"
+    become: no
+
+  - name: clean up extracted patch files and dirs in temp dir
+    file:
+      path: "{{ item }}"
+      state: absent
+    with_items:
+      - "{{ patch_tmp_dir }}"
+      - "{{ repo_install_dir }}"
+
+  when: (not rollback_soa or rollback_soa_to_previous) and not ansible_check_mode
+
+
+##=====================================================
+## Post patch/rollback actions
+##=====================================================
+ 
+- name: get soa patches applied
+  command: "{{ soa_home }}/OPatch/opatch lsinv -oh {{ soa_home }}"
+  register: soa_applied_post
+  changed_when: false
+  check_mode: no
+
+- name: print soa patches applied
+  debug:
+    var: soa_applied_post.stdout_lines
+
+- name: write soa patches applied to local lists file
+  local_action:
+    module: blockinfile
+    block: "{{ soa_applied_post.stdout_lines }}"
+    marker: "<!-- {mark} ANSIBLE MANAGED BLOCK - SOA PATCH(ES) -->"
+    create: yes
+    mode: 0666
+    path: "{{ lists_dir }}/{{ inventory_hostname }}"
+  become: no

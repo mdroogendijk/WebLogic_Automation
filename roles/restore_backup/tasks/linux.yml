@@ -1,0 +1,96 @@
+---
+## Tasks for restoring backups
+
+##=====================================================
+## Pre patch/rollback actions
+##=====================================================
+
+- block:
+
+  - name: check if weblogic processes are absent (before restoring)
+    command: pgrep -f "Dweblogic"
+    register: ps_check
+    changed_when: false
+    failed_when: ps_check.rc == 0
+    when: "wls_inv in inventory_file"
+
+  - name: check if webserver processes are absent (before restoring)
+    command: "pgrep -f {{ web_processname }}"
+    register: ps_check
+    changed_when: false
+    failed_when: ps_check.rc == 0
+    when: "webgate_inv in inventory_file"
+
+
+##=====================================================
+## Restore actions
+##=====================================================
+
+## WebLogic actions
+- block:
+
+  - name: get backup(s) to be restored
+    find:
+      paths: "{{ mw_home }}"
+      patterns: "*_bkp.tar.gz"
+    register: backup_tarballs
+
+  - name: print backup(s) to be restored
+    debug:
+      msg: "backup to restore: {{ item.path }}"
+    with_items:
+      - "{{ backup_tarballs.files }}"
+
+  - name: restore backup(s)
+    unarchive:
+      src: "{{ item.path }}"
+      dest: "{{ mw_home }}"
+      remote_src: yes
+    when: "'patch-catalog_bkp.tar.gz' not in item.path"
+    with_items:
+      - "{{ backup_tarballs.files }}"
+
+  - name: restore backup of bsu patch-catalog
+    unarchive:
+      src: "{{ item.path }}"
+      dest: "{{ bsu_dir }}"
+      remote_src: yes
+    when: "'patch-catalog_bkp.tar.gz' in item.path"
+    with_items:
+      - "{{ backup_tarballs.files }}"
+
+  when: "wls_inv in inventory_file"
+
+## WebGate actions
+- block:
+
+  - name: get backup(s) to be restored
+    find:
+      paths: "{{ webgate_base }}"
+      patterns: "*_bkp.tar.gz"
+    register: backup_tarballs
+
+  - name: print backup(s) to be restored
+    debug:
+      msg: "backup to restore: {{ item.path }}"
+    with_items:
+      - "{{ backup_tarballs.files }}"
+
+  - name: restore backup(s)
+    unarchive:
+      src: "{{ item.path }}"
+      dest: "{{ webgate_base }}"
+      remote_src: yes
+    with_items:
+      - "{{ backup_tarballs.files }}"
+
+  - name: change ownership before running opatch
+    file:
+      path: "{{ item }}"
+      owner: "{{ privileged_user_webgate }}"
+      group: "{{ privileged_group_webgate }}"
+      recurse: yes
+    with_items:
+      - "{{ webgate_home }}"
+
+  become_user: "root"

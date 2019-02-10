@@ -1,0 +1,6 @@
+{
+"java_version": 1.7.0_211, 
+"wls_patch": ['7HKN'], 
+"include_soa": false, 
+"include_osb": false
+}

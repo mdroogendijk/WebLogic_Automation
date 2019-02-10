@@ -6,6 +6,15 @@
 ## Pre patch/rollback actions
 ##=====================================================
 
+- name: check if enough disk space is available
+  assert:
+    that:
+      - item.size_available > mounts_used[item.mount]
+    msg: "Insufficient disk space available on {{ item.mount }}"
+  when: item.mount in mounts_used
+  with_items:
+    - "{{ ansible_mounts }}"
+
 - name: get weblogic patches applied
   command: "./bsu.sh -view -status=applied -prod_dir={{ wls_home }}"
   args:
@@ -36,22 +45,6 @@
     path: "{{ lists_dir }}/{{ inventory_hostname }}"
   become: no
 
-- block:
-
-  - name: check if wls_patch is provided
-    assert:
-      that:
-        - wls_patch | match ("^[a-zA-Z]*$")
-      msg:
-        - "weblogic patch to install is not defined or not defined properly"
-        - "please provide wls_patch, f.e. --extra-vars wls_patch='GENM'"
-
-  - name: print weblogic patch to be applied/removed (csv format)
-    debug:
-      msg: "WebLogic patch to apply/remove: {{ wls_patch }}"
-
-  when: not ansible_check_mode
-
 - name: check if processes are absent (before patching)
   command: pgrep -f "Dweblogic"
   register: ps_check
@@ -62,6 +55,12 @@
 ##=====================================================
 ## Patch BSU actions
 ##=====================================================
+
+- name: set bsu mem args
+  lineinfile:
+    path: "{{ bsu_dir }}/bsu.sh"
+    regexp: '^MEM_ARGS='
+    line: 'MEM_ARGS="-Xms2560m -Xmx2560m -XX:+UseParallelGC"'
 
 - name: get bsu version as prereq check for bsu update
   command: "./bsu.sh -version"
@@ -78,6 +77,7 @@
       name: common_prep_repo
     vars:
       repo_dir: bsu
+      artifacts: "{{ bsu_patch }}"
 
   - name: extract bsu patch to bsu dir
     unarchive:
@@ -99,17 +99,69 @@
   
   when: "'3.3.0.0' in bsu_version.stdout and not ansible_check_mode"
 
+
+##=====================================================
+## Rollback actions
+##=====================================================
+
+- block:
+
+  - name: check if wls_rollback_patch is provided
+    assert:
+      that:
+        - wls_rollback_patch is defined
+      msg:
+        - "weblogic patch(es) to remove is not defined"
+        - "please provide wls_rollback_patch, f.e. --extra-vars wls_rollback_patch=['GENM','<optional_patch2>']"
+
+  - name: print weblogic patch(es) to be removed (csv format)
+    debug:
+      msg: "WebLogic patch(es) to remove: {{ wls_rollback_patch }}"
+
+  - name: rollback weblogic patch(es)
+    command: "./bsu.sh -remove -patchlist={{ item }} -prod_dir={{ wls_home }}"
+    args:
+      chdir: "{{ bsu_dir }}"
+    with_items:
+      - "{{ wls_rollback_patch }}"
+
+  when: rollback_wls
+
+
 ##=====================================================
 ## Patch WebLogic actions
 ##=====================================================
 
 - block:
 
+  - name: check if wls_patch is provided
+    assert:
+      that:
+        - wls_patch is defined
+      msg:
+        - "weblogic patch(es) to install is not defined"
+        - "please provide wls_patch, f.e. --extra-vars wls_patch=['GENM','<optional_patch2>']"
+
+  - name: print weblogic patch(es) to be applied (csv format)
+    debug:
+      msg: "WebLogic patch(es) to apply: {{ wls_patch }}"
+
+  - name: backup wlserver dir prior to patching
+    archive:
+      path: "{{ wls_home }}"
+      dest: "{{ mw_home }}/wlserver_10.3_bkp.tar.gz"
+
+  - name: backup patch-catalog prior to patching
+    archive:
+      path: "{{ bsu_cache_dir }}"
+      dest: "{{ mw_home }}/patch-catalog_bkp.tar.gz"
+
   - name: fetch weblogic patch zipfile(s) from artifactory
     include_role:
       name: common_prep_repo
     vars:
       repo_dir: weblogic
+      artifacts: "{{ wls_zipfiles }}"
 
   - name: get patch zipfile(s) in repo
     find:
@@ -129,9 +181,11 @@
   - name: check if patch jarfile is in bsu cache dir
     find:
       paths: "{{ bsu_cache_dir }}"
-      patterns: "{{ wls_patch }}.jar*"
+      patterns: "{{ item }}.jar*"
     register: jarfile_present
     failed_when: jarfile_present.matched == 0
+    with_items:
+      - "{{ wls_patch }}"
 
   - name: get conflicting patch(es) currently applied
     set_fact: 
@@ -148,13 +202,28 @@
     with_items:
       - "{{ conflict }}"
 
-  - name: apply weblogic patch
-    command: "./bsu.sh -install -patchlist={{ wls_patch }} -prod_dir={{ wls_home }}"
+  - name: apply weblogic patch(es)
+    command: "./bsu.sh -install -patchlist={{ item }} -prod_dir={{ wls_home }}"
     args:
       chdir: "{{ bsu_dir }}"
     register: patch_result
     ## ignore (OoM) errors while patching was successful
     failed_when: "'Result: Success' not in patch_result.stdout and 'Patch already installed' not in patch_result.stdout"
+    with_items:
+      - "{{ wls_patch }}"
+
+  - name: get file(s) in bsu cache dir to delete
+    find:
+      paths: "{{ bsu_cache_dir }}"
+      file_type: file
+    register: files_to_delete
+
+  - name: clean up weblogic patch file(s) 
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    when: "item.path != bsu_patch_catalog"
+    with_items: "{{ files_to_delete.files }}"
 
   - name: get weblogic patch zipfile(s) in temp dir
     find:
@@ -170,30 +239,8 @@
       - "{{ zipfiles_to_delete.files }}"
     become: no
 
-  when: not rollback_wls and not ansible_check_mode
+  when: (not rollback_wls or rollback_wls_to_previous) and not ansible_check_mode
 
- 
-##=====================================================
-## Rollback actions
-##=====================================================
-
-- block:
-
-  - name: rollback weblogic patch
-    command: "./bsu.sh -remove -patchlist={{ wls_patch }} -prod_dir={{ wls_home }}"
-    args:
-      chdir: "{{ bsu_dir }}"
-
-  - name: apply different (previous) weblogic patch if provided
-    command: "./bsu.sh -install -patchlist={{ rollback_wls_to_patch }} -prod_dir={{ wls_home }}"
-    args:
-      chdir: "{{ bsu_dir }}"
-    register: patch_result
-    ## ignore (OoM) errors while patching was successful
-    failed_when: "'Result: Success' not in patch_result.stdout and 'Patch already installed' not in patch_result.stdout"
-    when: rollback_wls_to_patch != ""
-
-  when: rollback_wls
 
 ##=====================================================
 ## Post patch/rollback actions

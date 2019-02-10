@@ -1,0 +1,12 @@
+---
+
+## Default values for this group, overriding values in group_vars/all
+
+## Default initd webserver scripts
+initd_web_scripts: "/etc/init.d/apache2-eservices-webgate-test*"
+
+## Default webgate location
+webgate_base: "/opt/oam-test"
+
+## Default processname for webgate pgrep tasks
+web_processname: "DESERVICES-SSL-TEST"

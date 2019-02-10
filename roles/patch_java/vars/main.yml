@@ -1,7 +1,10 @@
 ---
 
-## Location where patches are temporarily placed
-repo_install_dir: "/tmp/java"
+## Default mountpoints used for disk space check
+mounts_used:
+  ## minimum space needed in bytes
+  /data: 524288000
+  /var: 524288000
 
-repo_file_list:
-  - { part: 1, archive_file: "*.tar*" }
+## Location where patches are temporarily placed
+repo_install_dir: "/var/tmp/java"

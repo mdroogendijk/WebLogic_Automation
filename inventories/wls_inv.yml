@@ -1,0 +1,8 @@
+    ## Non upgraded hosts commented out
+weblogic_hosts:
+  children:
+    test:
+      children:
+        sandpit:
+          hosts:
+            testhost2:

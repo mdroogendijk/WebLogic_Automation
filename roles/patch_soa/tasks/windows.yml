@@ -1,9 +1,9 @@
 ---
-## Tasks for stopping the application servers
+## Tasks for patching SOA
 
 
 ##=====================================================
-## Initial check
+## Pre patch/rollback actions
 ##=====================================================
 
 - name: placeholder

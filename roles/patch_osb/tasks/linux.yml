@@ -5,10 +5,17 @@
 ## Pre patch/rollback actions
 ##=====================================================
 
+- name: check if enough disk space is available
+  assert:
+    that:
+      - item.size_available > mounts_used[item.mount]
+    msg: "Insufficient disk space available on {{ item.mount }}"
+  when: item.mount in mounts_used
+  with_items:
+    - "{{ ansible_mounts }}"
+
 - name: get osb patches applied
-  command: "OPatch/opatch lsinv"
-  args:
-    chdir: "{{ osb_home }}"
+  command: "{{ osb_home }}/OPatch/opatch lsinv -oh {{ osb_home }}"
   register: osb_applied_pre
   changed_when: false
   check_mode: no
@@ -35,22 +42,6 @@
     path: "{{ lists_dir }}/{{ inventory_hostname }}"
   become: no
 
-- block:
-
-  - name: check if osb_patch is provided
-    assert:
-      that:
-        - osb_patch | match ("^[a-zA-Z]*$")
-      msg:
-        - "osb patch to install is not defined or not defined properly"
-        - "please provide osb_patch, f.e. --extra-vars osb_patch='...'"
-
-  - name: print osb patch to be applied/removed (csv format)
-    debug:
-      msg: "osb patch to apply/remove: {{ osb_patch }}"
-
-  when: not ansible_check_mode
-
 - name: check if processes are absent (before patching)
   command: pgrep -f "Dweblogic"
   register: ps_check
@@ -59,16 +50,58 @@
 
 
 ##=====================================================
+## Rollback actions
+##=====================================================
+
+- block:
+
+  - name: check if osb_rollback_patch is provided
+    assert:
+      that:
+        - osb_rollback_patch is defined
+      msg:
+        - "osb patch(es) to remove is not defined"
+        - "please provide osb_rollback_patch, f.e. --extra-vars osb_rollback_patch=['28481043','<optional_patch2>']"
+
+  - name: print osb patch(es) to be removed (csv format)
+    debug:
+      msg: "osb patch(es) to remove: {{ osb_rollback_patch }}"
+
+  - name: rollback osb patch(es)
+    command: "{{ osb_home }}/OPatch/opatch rollback -id {{ item }} -oh {{ osb_home }} -silent"
+    register: rollback_result
+    changed_when: "'Patch not present in the Oracle Home' not in rollback_result.stderr"
+    failed_when: rollback_result.rc != 0 and ("Patch not present in the Oracle Home" not in rollback_result.stderr)
+    with_items:
+      - "{{ osb_rollback_patch }}"
+
+  when: rollback_osb
+
+
+##=====================================================
 ## Patch OSB actions
 ##=====================================================
 
 - block:
+
+  - name: check if osb_patch is provided
+    assert:
+      that:
+        - osb_patch is defined
+      msg:
+        - "osb patch(es) to apply is not defined"
+        - "please provide osb_patch, f.e. --extra-vars osb_patch=['28481043','<optional_patch2>']"
+
+  - name: print osb patch(es) to be applied (csv format)
+    debug:
+      msg: "osb patch(es) to apply: {{ osb_patch }}"
 
   - name: fetch osb patch zipfile(s) from artifactory
     include_role:
       name: common_prep_repo
     vars:
       repo_dir: osb
+      artifacts: "{{ osb_zipfiles }}"
 
   - name: get patch zipfile(s) in repo
     find:
@@ -76,22 +109,33 @@
       patterns: "*.zip*"
     register: osb_patch_zipfiles
 
-  - name: extract patch zipfile(s) to idk yet
+  - name: ensure patch_tmp_dir exists
+    file:
+      path: "{{ patch_tmp_dir }}"
+      state: directory
+
+  - name: extract patch zipfile(s) to tmp dir
     unarchive:
       src: "{{ item.path }}"
-      dest: "{{ tmp_dir }}"
+      dest: "{{ patch_tmp_dir }}"
       list_files: yes
       remote_src: yes
     with_items:
       - "{{ osb_patch_zipfiles.files }}"
 
-  - name: apply osb patch
-    command: "OPatch/opatch lsinv -silent -force"
+  - name: backup osb dir prior to patching
+    archive:
+      path: "{{ osb_home }}"
+      dest: "{{ mw_home }}/Oracle_OSB1_bkp.tar.gz"
+
+  - name: apply osb patch(es)
+    command: "{{ osb_home }}/OPatch/opatch apply -oh {{ osb_home }} -silent -force"
     args:
-      chdir: "{{ wls_home }}"
+      chdir: "{{ patch_tmp_dir }}/{{ item }}"
     register: patch_result
-    ## ignore (OoM) errors while patching was successful
-#    failed_when: "'Result: Success' not in patch_result.stdout and 'Patch already installed' not in patch_result.stdout"
+    with_items:
+      - "{{ osb_patch }}"
+    changed_when: "'following patch(es) are already installed' not in patch_result.stdout"
 
   - name: get osb patch zipfile(s) in temp dir
     find:
@@ -107,40 +151,24 @@
       - "{{ zipfiles_to_delete.files }}"
     become: no
 
-  when: not rollback_osb and not ansible_check_mode
+  - name: clean up extracted patch files and dirs in temp dir
+    file:
+      path: "{{ item }}"
+      state: absent
+    with_items:
+      - "{{ patch_tmp_dir }}"
+      - "{{ repo_install_dir }}"
 
- 
-##=====================================================
-## Rollback actions
-##=====================================================
+  when: (not rollback_osb or rollback_osb_to_previous) and not ansible_check_mode
 
-- block:
-
-  - name: rollback osb patch
-    command: "OPatch/opatch lsinv -silent"
-    args:
-      chdir: "{{ wls_home }}"
-
-  - name: apply different (previous) osb patch if provided
-    command: "OPatch/opatch lsinv -silent -force"
-    args:
-      chdir: "{{ wls_home }}"
-    register: patch_result
-    ## ignore (OoM) errors while patching was successful
-#    failed_when: "'Result: Success' not in patch_result.stdout and 'Patch already installed' not in patch_result.stdout"
-    when: rollback_osb_to_patch != ""
-
-  when: rollback_osb
 
 ##=====================================================
 ## Post patch/rollback actions
 ##=====================================================
  
 - name: get osb patches applied
-  command: "OPatch/opatch lsinv"
-  args:
-    chdir: "{{ wls_home }}"
-  register: wls_applied_post
+  command: "{{ osb_home }}/OPatch/opatch lsinv -oh {{ osb_home }}"
+  register: osb_applied_post
   changed_when: false
   check_mode: no
 

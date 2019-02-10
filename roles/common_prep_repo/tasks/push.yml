@@ -10,13 +10,9 @@
 
 - name: push file to target
   copy: 
-    src: "{{ item }}"
+    src: "/repos/{{ repo_source }}/{{ repo_dir }}/{{ item }}"
     dest: "{{ repo_install_dir }}"
     mode: 0644
-  with_fileglob:
-    - "/repos/{{ repo_source }}/{{ repo_dir }}/*"
   become: no
-
-#  become: yes
-#  become_user: root
-#  become_method: sudo
+  with_items:
+    - "{{ artifacts }}"

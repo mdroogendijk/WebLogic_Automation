@@ -8,16 +8,59 @@
 
 - block:
 
+  - name: Gather facts as root
+    setup:
+      gather_subset:
+        - 'all'
+
+  - name: add local user for patching
+    user:
+      name: "{{ privileged_user_webgate }}"
+      group: "{{ privileged_group_webgate }}"
+      shell: /bin/bash
+      system: yes
+    check_mode: no
+
+  - name: add o+rx access for oam dir 
+    file:
+      path: "{{ webgate_base }}"
+      mode: 0755
+
+  - name: get java version
+    command: "{{ java_exec }} -version"
+    register: java_pre
+    changed_when: false
+    ignore_errors: true
+    check_mode: no
+
+  become_user: "root"
+
+- name: check if enough disk space is available
+  assert:
+    that:
+      - item.size_available > mounts_used[item.mount]
+    msg: "Insufficient disk space available on {{ item.mount }}"
+  when: item.mount in mounts_used
+  with_items:
+    - "{{ ansible_mounts }}"
+  become: no
+  
+- block:
+
   - name: create dir for temporary java installation
     file:
       path: "{{ java_base }}"
       state: directory
+      owner: "{{ privileged_user_webgate }}"
+      group: "{{ privileged_group_webgate }}"
+    become_user: "root"
 
   - name: fetch java tarball from artifactory
     include_role:
       name: common_prep_repo
     vars:
       repo_dir: java
+      artifacts: "{{ java_tarball }}"
 
   - name: get new java tarball
     find:
@@ -53,20 +96,44 @@
       - "{{ tarball_to_delete.files }}"
     become: no
 
-  when: not ansible_check_mode
-
+  ## Temp java install even in check mode, needed for opatch (lsinv)
+  check_mode: no
+  when: "java_pre.stderr_lines is not defined or java_version not in java_pre.stderr"
 
 ##=====================================================
 ## Pre patch/rollback actions
 ##=====================================================
 
-- name: get webgate patches applied
-  command: "Opatch/opatch lsinv -jre {{ java_base }}/jdk -oh {{ webgate_home }}"
-  args:
-    chdir: "{{ wls_home }}"
-  register: webgate_applied_pre
-  changed_when: false
-#  check_mode: no
+- block:
+
+  - name: change ownership before running opatch
+    file:
+      path: "{{ item }}"
+      owner: "{{ privileged_user_webgate }}"
+      group: "{{ privileged_group_webgate }}"
+      recurse: yes
+    with_items:
+      - "{{ webgate_home }}"
+      - "{{ webgate_inventory }}"
+    become_user: "root"
+
+  - name: get webgate patches applied
+    command: "{{ webgate_home }}/OPatch/opatch lsinv -jre {{ java_base }}/jdk"
+    register: webgate_applied_pre
+    changed_when: false
+
+  - name: change ownership after running opatch
+    file:
+      path: "{{ item }}"
+      owner: "{{ privileged_user_webgate_original }}"
+      group: "{{ privileged_group_webgate_original }}"
+      recurse: yes
+    with_items:
+      - "{{ webgate_home }}"
+      - "{{ webgate_inventory }}"
+    become_user: "root"
+
+  check_mode: no
 
 - name: print webgate patches applied
   debug:
@@ -90,27 +157,62 @@
     path: "{{ lists_dir }}/{{ inventory_hostname }}"
   become: no
 
-- block:
-
-  - name: check if webgate_patch is provided
-    assert:
-      that:
-        - webgate_patch | match ("^[a-zA-Z]*$")
-      msg:
-        - "webgate patch to install is not defined or not defined properly"
-        - "please provide webgate_patch, f.e. --extra-vars webgate_patch='...'"
-
-  - name: print webgate patch to be applied/removed (csv format)
-    debug:
-      msg: "webgate patch to apply/remove: {{ webgate_patch }}"
-
-  when: not ansible_check_mode
-
 - name: check if processes are absent (before patching)
-  command: pgrep -f "httpd"
+  command: "pgrep -f {{ web_processname }}"
   register: ps_check
   changed_when: false
   failed_when: ps_check.rc == 0
+
+
+##=====================================================
+## Rollback actions
+##=====================================================
+
+- block:
+
+  - name: check if webgate_rollback_patch is provided
+    assert:
+      that:
+        - webgate_rollback_patch is defined
+      msg:
+        - "webgate patch(es) to remove is not defined"
+        - "please provide webgate_rollback_patch, f.e. --extra-vars webgate_rollback_patch=['27975790','<optional_patch2>']"
+
+  - name: print webgate patch to be removed (csv format)
+    debug:
+      msg: "webgate patch(es) to remove: {{ webgate_rollback_patch }}"
+
+  - name: change ownership before running opatch
+    file:
+      path: "{{ item }}"
+      owner: "{{ privileged_user_webgate }}"
+      group: "{{ privileged_group_webgate }}"
+      recurse: yes
+    with_items:
+      - "{{ webgate_home }}"
+      - "{{ webgate_inventory }}"
+    become_user: "root"
+
+  - name: rollback webgate patch
+    command: "{{ webgate_home }}/OPatch/opatch rollback -id {{ item }} -jre {{ java_base }}/jdk -silent"
+    register: rollback_result
+    changed_when: "'Patch not present in the Oracle Home' not in rollback_result.stderr"
+    failed_when: rollback_result.rc != 0 and ("Patch not present in the Oracle Home" not in rollback_result.stderr)
+    with_items:
+      - "{{ webgate_rollback_patch }}"
+
+  - name: change ownership after running opatch
+    file:
+      path: "{{ item }}"
+      owner: "{{ privileged_user_webgate_original }}"
+      group: "{{ privileged_group_webgate_original }}"
+      recurse: yes
+    with_items:
+      - "{{ webgate_home }}"
+      - "{{ webgate_inventory }}"
+    become_user: "root"
+
+  when: rollback_webgate
 
 
 ##=====================================================
@@ -119,11 +221,24 @@
 
 - block:
 
+  - name: check if webgate_patch is provided
+    assert:
+      that:
+        - webgate_patch is defined
+      msg:
+        - "webgate patch to install is not defined"
+        - "please provide webgate_patch, f.e. --extra-vars webgate_patch=['27975790','<optional_patch2>']"
+
+  - name: print webgate patch to be applied (csv format)
+    debug:
+      msg: "webgate patch(es) to apply: {{ webgate_patch }}"
+
   - name: fetch webgate patch zipfile(s) from artifactory
     include_role:
       name: common_prep_repo
     vars:
       repo_dir: webgate
+      artifacts: "{{ webgate_zipfiles }}"
 
   - name: get patch zipfile(s) in repo
     find:
@@ -131,22 +246,56 @@
       patterns: "*.zip*"
     register: webgate_patch_zipfiles
 
-  - name: extract patch zipfile(s) to idk yet
+  - name: ensure patch_tmp_dir exists
+    file:
+      path: "{{ patch_tmp_dir }}"
+      state: directory
+
+  - name: extract patch zipfile(s) to tmp dir
     unarchive:
       src: "{{ item.path }}"
-      dest: "{{ tmp_dir }}"
+      dest: "{{ patch_tmp_dir }}"
       list_files: yes
       remote_src: yes
     with_items:
       - "{{ webgate_patch_zipfiles.files }}"
 
+  - name: backup webgate dir prior to patching
+    archive:
+      path: "{{ webgate_home }}"
+      dest: "{{ webgate_base }}/webgate_bkp.tar.gz"
+    become_user: root
+
+  - name: change ownership before running opatch
+    file:
+      path: "{{ item }}"
+      owner: "{{ privileged_user_webgate }}"
+      group: "{{ privileged_group_webgate }}"
+      recurse: yes
+    with_items:
+      - "{{ webgate_home }}"
+      - "{{ webgate_inventory }}"
+    become_user: "root"
+
   - name: apply webgate patch
-    command: "Opatch/opatch lsinv -jre {{ java_base }}/jdk -oh {{ webgate_home }} -silent -force"
+    command: "{{ webgate_home }}/OPatch/opatch apply -jre {{ java_base }}/jdk -silent -force"
     args:
-      chdir: "{{ wls_home }}"
+      chdir: "{{ patch_tmp_dir }}/{{ item }}"
     register: patch_result
-    ## ignore (OoM) errors while patching was successful
-#    failed_when: "'Result: Success' not in patch_result.stdout and 'Patch already installed' not in patch_result.stdout"
+    with_items:
+      - "{{ webgate_patch }}"
+    changed_when: "'following patch(es) are already installed' not in patch_result.stdout"
+
+  - name: change ownership after running opatch
+    file:
+      path: "{{ item }}"
+      owner: "{{ privileged_user_webgate_original }}"
+      group: "{{ privileged_group_webgate_original }}"
+      recurse: yes
+    with_items:
+      - "{{ webgate_home }}"
+      - "{{ webgate_inventory }}"
+    become_user: "root"
 
   - name: get webgate patch zipfile(s) in temp dir
     find:
@@ -162,41 +311,50 @@
       - "{{ zipfiles_to_delete.files }}"
     become: no
 
-  when: not rollback_webgate and not ansible_check_mode
+  - name: clean up extracted patch files and dirs in temp dir
+    file:
+      path: "{{ item }}"
+      state: absent
+    with_items:
+      - "{{ patch_tmp_dir }}"
+      - "{{ repo_install_dir }}"
 
- 
-##=====================================================
-## Rollback actions
-##=====================================================
+  when: (not rollback_webgate or rollback_webgate_to_previous) and not ansible_check_mode
 
-- block:
-
-  - name: rollback webgate patch
-    command: "Opatch/opatch lsinv -jre {{ java_base }}/jdk -oh {{ webgate_home }} -silent"
-    args:
-      chdir: "{{ wls_home }}"
-
-  - name: apply different (previous) webgate patch if provided
-    command: "Opatch/opatch lsinv -jre {{ java_base }}/jdk -oh {{ webgate_home }} -silent -force"
-    args:
-      chdir: "{{ wls_home }}"
-    register: patch_result
-    ## ignore (OoM) errors while patching was successful
-#    failed_when: "'Result: Success' not in patch_result.stdout and 'Patch already installed' not in patch_result.stdout"
-    when: rollback_webgate_to_patch != ""
-
-  when: rollback_webgate
 
 ##=====================================================
 ## Post patch/rollback actions
 ##=====================================================
+
+- block:
+
+  - name: change ownership before running opatch
+    file:
+      path: "{{ item }}"
+      owner: "{{ privileged_user_webgate }}"
+      group: "{{ privileged_group_webgate }}"
+      recurse: yes
+    with_items:
+      - "{{ webgate_home }}"
+      - "{{ webgate_inventory }}"
+    become_user: "root"
  
-- name: get webgate patches applied
-  command: "Opatch/opatch lsinv -jre {{ java_base }}/jdk -oh {{ webgate_home }}"
-  args:
-    chdir: "{{ wls_home }}"
-  register: wls_applied_post
-  changed_when: false
+  - name: get webgate patches applied
+    command: "{{ webgate_home }}/OPatch/opatch lsinv -jre {{ java_base }}/jdk"
+    register: webgate_applied_post
+    changed_when: false
+
+  - name: change ownership after running patch
+    file:
+      path: "{{ item }}"
+      owner: "{{ privileged_user_webgate_original }}"
+      group: "{{ privileged_group_webgate_original }}"
+      recurse: yes
+    with_items:
+      - "{{ webgate_home }}"
+      - "{{ webgate_inventory }}"
+    become_user: "root"
+
   check_mode: no
 
 - name: print webgate patches applied
@@ -212,8 +370,3 @@
     mode: 0666
     path: "{{ lists_dir }}/{{ inventory_hostname }}"
   become: no
-
-- name: clean up temporary java installation
-  file:
-    path: "{{ java_base }}"
-    state: absent

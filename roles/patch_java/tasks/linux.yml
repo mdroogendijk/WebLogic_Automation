@@ -5,6 +5,15 @@
 ## Pre patch/rollback actions
 ##=====================================================
 
+- name: check if enough disk space is available
+  assert:
+    that:
+      - item.size_available > mounts_used[item.mount]
+    msg: "Insufficient disk space available on {{ item.mount }}"
+  when: item.mount in mounts_used
+  with_items:
+    - "{{ ansible_mounts }}"
+
 - name: get java version
   command: "{{ java_exec }} -version"
   register: java_pre
@@ -82,6 +91,7 @@
       name: common_prep_repo
     vars:
       repo_dir: java
+      artifacts: "{{ java_tarball }}"
 
   - name: get new java tarball
     find:
@@ -119,7 +129,8 @@
 
   ## Placeholder for java.security changes and such, if needed
   
-  when: not rollback_java and not ansible_check_mode
+  when: not rollback_java and not ansible_check_mode and java_version not in java_pre.stderr
+
     
 
 ##=====================================================

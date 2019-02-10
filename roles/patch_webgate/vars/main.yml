@@ -1,10 +1,20 @@
 ---
 
+## Default mountpoints used for disk space check
+mounts_used:
+  ## minimum space needed in bytes
+  /opt: 524288000
+  /var: 524288000
+
 ## Location for temporary java installation
-java_base: "/tmp/temp_java"
+java_base: "{{ webgate_base }}/temp_java"
+
+## Use webgate user for included common_prep_repo role
+privileged_user: "{{ privileged_user_webgate }}"
+privileged_group: "{{ privileged_group_webgate }}"
+
+## Default tmp location for extracted opatch patches
+patch_tmp_dir: "/var/tmp/Webgate_patch"
 
 ## Location where patches are temporarily placed
-repo_install_dir: "/tmp/webgate_patches"
-
-repo_file_list:
-  - { part: 1, archive_file: "*.zip*" }
+repo_install_dir: "/var/tmp/webgate_patches"

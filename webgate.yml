@@ -3,11 +3,13 @@
 
 - name: Patch webgate agents
   hosts: webgate_hosts
-  ## Perform all tasks on 25% of the hosts before going to the next 25%
-  serial: "25%"
+  ## Perform all tasks on 100% of the hosts in parallel
+  serial: "100%"
+
+  gather_facts: false
 
   become: yes
-  become_user: "{{ privileged_user }}"
+  become_user: "{{ privileged_user_webgate }}"
   become_method: sudo
 
   tasks:
@@ -17,10 +19,16 @@
       - include_role:
           name: webgate_stop
         tags: [stop,restart]
+
+      - include_role:
+          name: restore_backup
+        tags: restore_backup
+        when: include_restore
       
       - include_role: 
           name: patch_webgate
         tags: patch_webgate
+        when: include_webgate
     
       - include_role: 
           name: webgate_start

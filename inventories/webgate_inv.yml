@@ -1,0 +1,7 @@
+webgate_hosts:
+  children:
+    devtest:
+      children:
+        webgate_test:
+          hosts:
+            testhost1:

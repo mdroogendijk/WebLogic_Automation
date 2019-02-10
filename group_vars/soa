@@ -3,7 +3,7 @@
 ## Default values for this group, overriding values in group_vars/all
 
 ## Include OSB roles
-include_osb: true
+include_soa: true
 
 ## SSH through jumphost
 ansible_ssh_common_args: '-F {{ lookup("env", "HOME") }}/.ssh/ssh.cfg -o StrictHostKeyChecking=no -o ProxyCommand="ssh -W %h:%p {{ lookup("env", "USER") }}@jmpbox"'

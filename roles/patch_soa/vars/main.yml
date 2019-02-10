@@ -3,11 +3,11 @@
 ## Default mountpoints used for disk space check
 mounts_used:
   ## minimum space needed in bytes
-  /data: 314572800
-  /var: 314572800
+  /data: 1256291200
+  /var: 1258291200
 
 ## Default tmp location for extracted opatch patches
-patch_tmp_dir: "/var/tmp/osb_patch"
+patch_tmp_dir: "/var/tmp/soa_patch"
 
 ## Location where patches are temporarily placed
-repo_install_dir: "/var/tmp/osb_patches"
+repo_install_dir: "/var/tmp/soa_patches"

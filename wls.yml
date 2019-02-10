@@ -3,10 +3,8 @@
 
 - name: Patch WebLogic servers including jdk and potentially OSB/SOA
   hosts: weblogic_hosts
-  ## Perform all tasks on 25% of the hosts before going to the next 25%
-  serial: "25%"
-
-  gather_facts: False
+  ## Perform all tasks on 100% of the hosts in parallel
+  serial: "100%"
 
   become: yes
   become_user: "{{ privileged_user }}"
@@ -19,19 +17,31 @@
       - include_role:
           name: wls_stop
         tags: [stop,restart]
+
+      - include_role:
+          name: restore_backup
+        tags: restore_backup
+        when: include_restore
       
       - include_role: 
           name: patch_java
         tags: patch_java
+        when: include_java
     
       - include_role: 
           name: patch_wls
         tags: patch_wls
+        when: include_wls
 
       - include_role:
           name: patch_osb
         tags: patch_osb
         when: include_osb
+
+      - include_role:
+          name: patch_soa
+        tags: patch_soa
+        when: include_soa
   
       - include_role: 
           name: wls_start
